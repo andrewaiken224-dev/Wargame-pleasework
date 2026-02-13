@@ -123,6 +123,7 @@
   .infraSvg{position:absolute; inset:0; z-index:3; width:100%; height:100%; pointer-events:none;}
   .overlaySvg{position:absolute; inset:0; z-index:4; width:100%; height:100%; pointer-events:none;}
   .unitsLayer{position:absolute; inset:0; z-index:5;}
+  .fxLayer{position:absolute; inset:0; z-index:5.5; pointer-events:none; overflow:hidden;}
   .interaction{
     position:absolute; inset:0; z-index:6;
     pointer-events:none;
@@ -167,6 +168,25 @@
     overflow:hidden; text-overflow:ellipsis;
   }
   .unitMeta .id{max-width:70%}
+  .unitStatus{position:absolute; left:8px; right:8px; top:7px; display:flex; gap:6px; align-items:center; font-size:10px; font-weight:900; color:#fff; pointer-events:none;}
+  .statusPill{padding:2px 6px; border-radius:999px; border:1px solid rgba(255,255,255,.35); background:rgba(0,0,0,.38)}
+  .hpBar{height:6px; flex:1; border-radius:999px; background:rgba(255,255,255,.2); overflow:hidden; border:1px solid rgba(0,0,0,.45)}
+  .hpFill{height:100%; background:linear-gradient(90deg,#ef4444,#f59e0b,#22c55e)}
+  .historyLog{max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:12px; padding:8px; background:rgba(9,14,21,.55)}
+  .historyItem{padding:8px; border:1px solid #2a3d59; border-radius:10px; margin-bottom:8px; cursor:pointer; background:rgba(16,27,42,.35)}
+  .historyItem:hover{border-color:#3e5f8a}
+  .phaseBadge{font-weight:900}
+
+  .orderPath{stroke-dasharray:10 8; animation:dashFlow 500ms linear infinite;}
+  @keyframes dashFlow{from{stroke-dashoffset:0}to{stroke-dashoffset:-18}}
+  .combatFx,.captureFx{position:absolute; border-radius:999px; pointer-events:none;}
+  .combatFx{width:16px;height:16px;background:radial-gradient(circle,#fff,#ff3b3b); animation:combatBurst .55s ease-out forwards;}
+  .captureFx{width:24px;height:24px;background:radial-gradient(circle,rgba(122,167,255,.55),rgba(122,167,255,0)); animation:captureWave .95s ease-out forwards;}
+  @keyframes combatBurst{from{transform:translate(-50%,-50%) scale(.5);opacity:1}to{transform:translate(-50%,-50%) scale(4);opacity:0}}
+  @keyframes captureWave{from{transform:translate(-50%,-50%) scale(.6);opacity:.95}to{transform:translate(-50%,-50%) scale(9);opacity:0}}
+
+  .summaryModal{position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,.62); display:none; align-items:center; justify-content:center;}
+  .summaryCard{width:min(720px,92vw); background:linear-gradient(180deg,var(--panel),var(--panel2)); border:1px solid var(--line); border-radius:16px; padding:14px;}
 
   @keyframes pulse {
     0% { transform: scale(1); filter: drop-shadow(0 6px 14px rgba(0,0,0,.35)); }
@@ -446,10 +466,10 @@
       <label>Echelon / Prefix</label>
       <div class="row">
         <select id="echelon" class="bigSelect">
-          <option value="TM">TM</option><option value="SQ">SQ</option><option value="PLT">PLT</option>
+          <option value="SEC">SEC</option><option value="SQ">SQ</option><option value="SECTION">SECTION</option><option value="PLT">PLT</option>
           <option value="CO">CO</option><option value="BN">BN</option><option value="REG">REG</option>
           <option value="BDE">BDE</option><option value="DIV" selected>DIV</option>
-          <option value="CORPS">CORPS</option><option value="ARMY">ARMY</option>
+          <option value="CORPS">CORPS</option><option value="ARMY">ARMY</option><option value="AG">ARMY GROUP</option>
           <option value="FLEET">FLEET</option>
           <option value="CSG">CSG</option>
         </select>
@@ -463,6 +483,21 @@
 
       <label>Unit label (optional)</label>
       <input type="text" id="unitLabel" placeholder="ex: 1st Infantry Division / 2nd Tank Bn" />
+      <div class="row">
+        <select id="unitModifier" class="bigSelect">
+          <option value="none">No modifier</option><option value="mechanized">Mechanized</option><option value="motorized">Motorized</option>
+          <option value="armored">Armored</option><option value="airborne">Airborne</option><option value="marine">Marine</option><option value="mountain">Mountain</option>
+        </select>
+        <select id="unitReadiness" class="bigSelect">
+          <option value="full">Readiness: Full</option><option value="reduced">Readiness: Reduced</option><option value="minimal">Readiness: Minimal</option>
+        </select>
+      </div>
+      <div class="row">
+        <select id="unitSupply" class="bigSelect">
+          <option value="well">Supply: Well-supplied</option><option value="low">Supply: Low</option><option value="out">Supply: Out</option>
+        </select>
+        <input type="number" id="unitMorale" min="0" max="100" value="75" placeholder="Morale" />
+      </div>
 
       <div class="row">
         <button class="btn good" id="btnAddUnit">➕ Add Unit</button>
@@ -522,6 +557,40 @@
         <button class="btn" id="btnAddCustomType">➕ Add Custom Type</button>
         <button class="btn secondary" id="btnResetTypes">Reset Defaults</button>
       </div>
+
+      <div class="sep"></div>
+      <h3 style="margin-top:0">Turn Orders / Resolution</h3>
+      <div class="row">
+        <span class="badge">Phase: <span id="phaseLabel" class="phaseBadge">Planning</span></span>
+        <span class="badge">CP: <span id="cpLabel">8</span></span>
+      </div>
+      <div class="row">
+        <select id="orderType" class="bigSelect">
+          <option value="move">Move</option><option value="attack">Attack</option><option value="defend">Defend</option><option value="recon">Recon</option>
+        </select>
+        <button class="btn" id="btnQueueOrder">Queue Selected Order</button>
+      </div>
+      <div class="row">
+        <button class="btn good" id="btnResolveTurn">Resolve Turn</button>
+        <button class="btn secondary" id="btnClearOrders">Clear Orders</button>
+      </div>
+      <textarea id="turnLogText" rows="4" placeholder="Turn event log appears here..."></textarea>
+
+      <div class="sep"></div>
+      <h3 style="margin-top:0">Unit Builder + ORBAT</h3>
+      <div class="row">
+        <input type="number" id="builderPower" value="60" min="1" max="200" placeholder="Combat" />
+        <input type="number" id="builderMobility" value="55" min="1" max="200" placeholder="Mobility" />
+      </div>
+      <div class="row">
+        <input type="number" id="builderSupplyNeed" value="40" min="1" max="200" placeholder="Supply Need" />
+        <select id="orbatParent" class="bigSelect"><option value="">Parent: none</option></select>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Turn History</h3>
+      <div class="historyLog" id="historyLog"></div>
     </div>
 
     <div class="card">
@@ -563,6 +632,7 @@
           <svg class="infraSvg" id="infraSvg" viewBox="0 0 1600 900" preserveAspectRatio="none"></svg>
           <svg class="overlaySvg" id="overlaySvg" viewBox="0 0 1600 900" preserveAspectRatio="none"></svg>
           <div class="unitsLayer" id="unitsLayer"></div>
+          <div class="fxLayer" id="fxLayer"></div>
           <div class="interaction" id="interaction" title="Interaction layer"></div>
         </div>
       </div>
@@ -591,6 +661,16 @@
 
 <div class="toast" id="toast"></div>
 
+<div class="summaryModal" id="summaryModal">
+  <div class="summaryCard">
+    <h3 style="margin:0 0 10px 0">Turn Summary</h3>
+    <div id="summaryBody"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn good" id="btnCloseSummary">Continue Planning</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ================= Utils ================= */
 const $ = (id)=>document.getElementById(id);
@@ -617,6 +697,55 @@ function stagePointFromClient(ev){
   const stage=$("stage");
   const rect=stage.getBoundingClientRect();
   return { x:(ev.clientX-rect.left)/state.stage.zoom, y:(ev.clientY-rect.top)/state.stage.zoom };
+}
+function setPhase(next){
+  state.phase=next;
+  $("phaseLabel").textContent=next==="planning"?"Planning":"Resolution";
+}
+function updateCP(delta=0){
+  state.commandPoints.current=clamp(0,999,state.commandPoints.current+delta);
+  $("cpLabel").textContent=state.commandPoints.current;
+}
+function unitById(id){ return state.units.find(u=>u.id===id); }
+function orderCost(type){ return ({move:1,recon:1,defend:1,attack:2})[type]||1; }
+function unitCombatPower(u){
+  const readiness={full:1,reduced:.75,minimal:.45}[u.readiness||"full"]||1;
+  const supply={well:1,low:.75,out:.45}[u.supply||"well"]||1;
+  const morale=((u.morale??75)/100);
+  return Math.round((u.power||60)*readiness*supply*morale);
+}
+function renderTurnHistory(){
+  const box=$("historyLog");
+  if(!box) return;
+  box.innerHTML="";
+  const items=state.turnHistory.slice().reverse();
+  for(const e of items){
+    const d=document.createElement("div");
+    d.className="historyItem";
+    d.innerHTML=`<b>Turn ${e.turn}</b> — ${escapeHtml(e.title)}<div class="hint">${escapeHtml(e.summary||"")}</div>`;
+    d.onclick=()=>{
+      const idx=state.snapshots.findIndex(s=>s.turn===e.turn);
+      if(idx>=0){ $("turnSlider").value=idx; loadSnapshot(idx); }
+    };
+    box.appendChild(d);
+  }
+}
+function addTurnLog(title, summary=""){
+  state.turnHistory.push({turn:state.turn,title,summary,ts:Date.now()});
+  $("turnLogText").value = state.turnHistory.slice(-8).map(e=>`T${e.turn}: ${e.title}${e.summary?` — ${e.summary}`:""}`).join("\n");
+  renderTurnHistory();
+}
+function showFx(kind,x,y){
+  const fx=$("fxLayer"); if(!fx) return;
+  const n=document.createElement("div");
+  n.className = kind==="capture" ? "captureFx" : "combatFx";
+  n.style.left=x+"px"; n.style.top=y+"px";
+  fx.appendChild(n);
+  setTimeout(()=>n.remove(), 1100);
+}
+function showTurnSummary(html){
+  $("summaryBody").innerHTML=html;
+  $("summaryModal").style.display="flex";
 }
 function dist2(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy; }
 function pointInPolygon(pt, poly){
@@ -669,7 +798,15 @@ const state={
   },
 
   paint:{ down:false, pts:[] },
-  replay:{on:false,timer:null}
+  replay:{on:false,timer:null},
+  phase:"planning",
+  commandPoints:{base:8,current:8},
+  orderQueue:[],
+  pendingOrderType:null,
+  turnHistory:[],
+  fogOfWar:true,
+  aiEnabled:false,
+  selectedUnits:[]
 };
 
 const AUTOSAVE_KEY="war_tracker_v74_autosave";
@@ -1301,6 +1438,12 @@ function renderInfra(){
     if(s.kind==="stamp") infraSvg.appendChild(stampToSvg(s));
     if(s.kind==="label") infraSvg.appendChild(labelToSvg(s));
   }
+  const parentSel=$("orbatParent");
+  if(parentSel){
+    const keep=parentSel.value;
+    parentSel.innerHTML='<option value="">Parent: none</option>'+state.units.map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.id)} — ${escapeHtml(u.label)}</option>`).join('');
+    parentSel.value=keep;
+  }
   applyLayerToggles();
 }
 function infraLineToSvg(s){
@@ -1514,6 +1657,16 @@ function renderOverlays(){
   for(const s of state.shapes){
     overlaySvg.appendChild(overlayToSvg(s));
   }
+  for(const u of state.units){
+    if(!u.parentId) continue;
+    const p=unitById(u.parentId); if(!p) continue;
+    const l=document.createElementNS("http://www.w3.org/2000/svg","line");
+    l.setAttribute("x1", p.x+p.w/2); l.setAttribute("y1", p.y+p.h/2);
+    l.setAttribute("x2", u.x+u.w/2); l.setAttribute("y2", u.y+u.h/2);
+    l.setAttribute("stroke", "rgba(255,255,255,.35)"); l.setAttribute("stroke-dasharray","5 6");
+    overlaySvg.appendChild(l);
+  }
+  renderOrderPaths();
   applyLayerToggles();
 }
 
@@ -1557,15 +1710,18 @@ function buildFunctionIconPath(icon, domain){
 function unitSvg(u){
   const tpl=state.templates[u.typeKey]||{name:"UNIT",icon:"hq"};
   const stroke=affilColor(u.affil);
-  const frame=buildFramePath(u.affil);
-  const icon=buildFunctionIconPath(tpl.icon, u.domain);
+  const seen = !state.fogOfWar || u.affil!=="hostile" || state.units.some(a=>a.affil==="friendly" && dist2(unitCenter(a),unitCenter(u))<240*240);
+  const frame=buildFramePath(seen?u.affil:"unknown");
+  const icon=buildFunctionIconPath(seen?tpl.icon:"hq", u.domain);
+  const title=seen?tpl.name:"UNKNOWN";
+  const mod=(u.modifier && u.modifier!=="none") ? ` • ${u.modifier.toUpperCase()}` : "";
   return `
     <svg viewBox="0 0 200 120" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
       <rect x="0" y="0" width="200" height="120" fill="rgba(255,255,255,0.02)" rx="10" />
       <path d="${frame}" fill="rgba(0,0,0,0.35)" stroke="${stroke}" stroke-width="4" />
       <path d="${icon}" fill="none" stroke="${stroke}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
       <text x="100" y="68" text-anchor="middle" font-family="system-ui,Segoe UI,Arial"
-            font-size="16" font-weight="950" fill="rgba(232,238,247,0.92)">${escapeHtml(tpl.name)}</text>
+            font-size="16" font-weight="950" fill="rgba(232,238,247,0.92)">${escapeHtml(title+mod)}</text>
       <text x="100" y="92" text-anchor="middle" font-family="system-ui,Segoe UI,Arial"
             font-size="12" font-weight="850" fill="rgba(159,176,199,0.92)">${escapeHtml(u.label)}</text>
     </svg>
@@ -1586,6 +1742,15 @@ function addUnit(){
     affil:$("affil").value,
     domain:$("domain").value,
     echelon,
+    modifier:$("unitModifier").value,
+    readiness:$("unitReadiness").value,
+    supply:$("unitSupply").value,
+    morale:parseInt($("unitMorale").value,10)||75,
+    hp:100,
+    power:parseInt($("builderPower").value,10)||60,
+    mobility:parseInt($("builderMobility").value,10)||55,
+    supplyNeed:parseInt($("builderSupplyNeed").value,10)||40,
+    parentId:$("orbatParent").value || null,
     x: 160 + Math.random()*180,
     y: 140 + Math.random()*180,
     w:170, h:102, rot:0
@@ -1615,6 +1780,13 @@ function renderUnits(){
     meta.innerHTML=`<div class="id">${escapeHtml(u.id)}</div><div class="echelon">${escapeHtml(u.echelon)}</div>`;
     el.appendChild(meta);
 
+    const st=document.createElement("div");
+    st.className="unitStatus";
+    const rd=(u.readiness||"full").slice(0,3).toUpperCase();
+    const sp=(u.supply||"well").slice(0,3).toUpperCase();
+    st.innerHTML=`<span class="statusPill">${rd}</span><span class="statusPill">${sp}</span><div class="hpBar"><div class="hpFill" style="width:${clamp(0,100,u.hp??100)}%"></div></div>`;
+    el.appendChild(st);
+
     const handles=document.createElement("div");
     handles.className="handles";
     handles.innerHTML=`<div class="rotHandle"></div>
@@ -1629,7 +1801,8 @@ function renderUnits(){
       ev.stopPropagation(); ev.preventDefault();
       state.selected={kind:"unit",id:u.id};
       $("selectedBadge").textContent=`Selected: unit ${u.id}`;
-      renderUnits();
+      unitsLayer.querySelectorAll(".unit.selected").forEach(node=>node.classList.remove("selected"));
+      el.classList.add("selected");
       startUnitDrag(ev, el, u);
     });
 
@@ -1639,7 +1812,8 @@ function renderUnits(){
         ev.stopPropagation(); ev.preventDefault();
         state.selected={kind:"unit",id:u.id};
         $("selectedBadge").textContent=`Selected: unit ${u.id}`;
-        renderUnits();
+        unitsLayer.querySelectorAll(".unit.selected").forEach(node=>node.classList.remove("selected"));
+        el.classList.add("selected");
         startUnitResize(ev, el, u,
           h.classList.contains("br")?"br":
           h.classList.contains("tr")?"tr":
@@ -1652,7 +1826,8 @@ function renderUnits(){
       ev.stopPropagation(); ev.preventDefault();
       state.selected={kind:"unit",id:u.id};
       $("selectedBadge").textContent=`Selected: unit ${u.id}`;
-      renderUnits();
+      unitsLayer.querySelectorAll(".unit.selected").forEach(node=>node.classList.remove("selected"));
+      el.classList.add("selected");
       startUnitRotate(ev, el, u);
     });
 
@@ -1661,8 +1836,22 @@ function renderUnits(){
       const nl=prompt("Edit label:", u.label);
       if(nl!==null){ u.label=nl.trim()||u.label; renderUnits(); recomputeAOTerritory(); }
     });
+    el.addEventListener("contextmenu",(ev)=>{
+      ev.preventDefault();
+      const act=prompt("Quick action: move / attack / defend / recon", "move");
+      if(!act) return;
+      $("orderType").value=["move","attack","defend","recon"].includes(act.toLowerCase())?act.toLowerCase():"move";
+      state.selected={kind:"unit",id:u.id};
+      $("btnQueueOrder").click();
+    });
 
     unitsLayer.appendChild(el);
+  }
+  const parentSel=$("orbatParent");
+  if(parentSel){
+    const keep=parentSel.value;
+    parentSel.innerHTML='<option value="">Parent: none</option>'+state.units.map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.id)} — ${escapeHtml(u.label)}</option>`).join('');
+    parentSel.value=keep;
   }
   applyLayerToggles();
 }
@@ -1847,8 +2036,13 @@ window.addEventListener("keydown",(e)=>{
       }
     }
   }
-  if(e.key.toLowerCase()==="d") duplicateSelectedUnit();
   if(e.key.toLowerCase()==="f") focusSelected();
+  if(e.altKey && e.key.toLowerCase()==="d") duplicateSelectedUnit();
+  if(state.appMode==="plan" && state.tool==="selectPlan" && !["input","textarea","select"].includes(tag)){
+    if(e.key.toLowerCase()==="a") $("orderType").value="attack";
+    if(e.key.toLowerCase()==="m") $("orderType").value="move";
+    if(e.key.toLowerCase()==="d") $("orderType").value="defend";
+  }
 });
 
 /* ================= Finish / Cancel ================= */
@@ -1968,6 +2162,16 @@ interaction.addEventListener("pointerdown",(ev)=>{
   }
 
   if(state.appMode==="plan" && state.tool==="selectPlan"){
+    if(state.pendingOrderType && state.selected.kind==="unit"){
+      const u=unitById(state.selected.id);
+      if(u){
+        state.orderQueue.push({id:"O-"+cryptoRand(), turn:state.turn, type:state.pendingOrderType, unitId:u.id, from:{x:u.x,y:u.y}, to:{x:p.x,y:p.y}});
+        addTurnLog("Order queued", `${u.id} ${state.pendingOrderType.toUpperCase()} to (${Math.round(p.x)},${Math.round(p.y)})`);
+        renderOrderPaths();
+      }
+      state.pendingOrderType=null;
+      return;
+    }
     clearSelection();
     return;
   }
@@ -2191,6 +2395,101 @@ function applyLayerToggles(){
   $(id).addEventListener("change", applyLayerToggles);
 });
 
+
+/* ================= Turn Orders / Resolution ================= */
+function renderOrderPaths(){
+  overlaySvg.querySelectorAll('.orderPath,.orderText').forEach(n=>n.remove());
+  for(const o of state.orderQueue){
+    const u=unitById(o.unitId); if(!u) continue;
+    const s={x:u.x+u.w/2,y:u.y+u.h/2};
+    const t={x:o.to?.x ?? s.x, y:o.to?.y ?? s.y};
+    const p=document.createElementNS('http://www.w3.org/2000/svg','line');
+    p.setAttribute('x1',s.x); p.setAttribute('y1',s.y); p.setAttribute('x2',t.x); p.setAttribute('y2',t.y);
+    p.setAttribute('stroke', affilColor(u.affil)); p.setAttribute('stroke-width', o.type==='attack'?'4':'3');
+    p.setAttribute('class','orderPath'); p.setAttribute('opacity','0.85');
+    overlaySvg.appendChild(p);
+  }
+}
+function animateUnitMove(u,to,dur=420){
+  return new Promise(res=>{
+    const sx=u.x, sy=u.y; const st=performance.now();
+    function tick(ts){
+      const t=Math.min(1,(ts-st)/dur);
+      const e=t<.5 ? 2*t*t : -1+(4-2*t)*t;
+      u.x=sx+(to.x-sx)*e; u.y=sy+(to.y-sy)*e;
+      renderUnits();
+      if(t<1) requestAnimationFrame(tick); else res();
+    }
+    requestAnimationFrame(tick);
+  });
+}
+function nearestEnemy(u){
+  let best=null,bd=Infinity;
+  for(const e of state.units){
+    if(e.id===u.id || e.affil===u.affil) continue;
+    const d=dist2({x:u.x,y:u.y},{x:e.x,y:e.y});
+    if(d<bd){bd=d; best=e;}
+  }
+  return best;
+}
+async function resolveTurn(){
+  if(state.phase!=="planning") return;
+  setPhase("resolution");
+  const report={moves:0,casualties:0,captures:0,combats:0};
+  const queue=state.orderQueue.splice(0);
+  for(const o of queue){
+    const u=unitById(o.unitId); if(!u || u.hp<=0) continue;
+    if(o.type==='move' || o.type==='recon' || o.type==='defend'){
+      if(o.to){
+        await animateUnitMove(u,{x:clamp(0,state.stage.w-u.w,o.to.x),y:clamp(0,state.stage.h-u.h,o.to.y)}, o.type==='recon'?300:460);
+        report.moves++;
+      }
+    }
+    if(o.type==='attack'){
+      const enemy=nearestEnemy(u);
+      if(enemy){
+        report.combats++;
+        const atk=unitCombatPower(u), def=unitCombatPower(enemy);
+        const terrainMod=1; const odds=atk/(def||1)*terrainMod;
+        const dmg=Math.round(clamp(8,35, 12 + odds*10));
+        enemy.hp=clamp(0,100,(enemy.hp??100)-dmg);
+        enemy.morale=clamp(0,100,(enemy.morale??75)-Math.round(dmg/2));
+        showFx('combat', enemy.x+enemy.w/2, enemy.y+enemy.h/2);
+        if(enemy.hp<=0){ report.casualties++; addTurnLog('Unit eliminated', `${enemy.id} removed by ${u.id}`); }
+      }
+    }
+  }
+  state.units=state.units.filter(u=>(u.hp??100)>0);
+  recomputeAOTerritory();
+  for(const z of state.shapes.filter(s=>s.kind==='zone'&&s.drawKind==='ao')){
+    if(z.owner){
+      const cx=z.points.reduce((a,p)=>a+p.x,0)/z.points.length;
+      const cy=z.points.reduce((a,p)=>a+p.y,0)/z.points.length;
+      showFx('capture',cx,cy); report.captures++;
+    }
+  }
+  renderOverlays(); renderUnits(); renderOrderPaths();
+  state.turn+=1; $('turnLabel').textContent=state.turn;
+  state.commandPoints.current=state.commandPoints.base; updateCP(0);
+  addTurnLog('Turn resolved', `Moves ${report.moves}, combats ${report.combats}, losses ${report.casualties}`);
+  showTurnSummary(`<ul><li>Moves executed: <b>${report.moves}</b></li><li>Combats: <b>${report.combats}</b></li><li>Casualties: <b>${report.casualties}</b></li><li>Territory checks: <b>${report.captures}</b></li></ul>`);
+  pushSnapshot(`Turn ${state.turn} resolved`);
+  setPhase('planning');
+}
+
+$('btnQueueOrder').onclick=()=>{
+  const t=$('orderType').value;
+  if(state.selected.kind!=="unit"){ toast('Select a unit first.'); return; }
+  const cost=orderCost(t);
+  if(state.commandPoints.current<cost){ toast('Not enough command points.'); return; }
+  state.pendingOrderType=t;
+  updateCP(-cost);
+  toast(`Click map to set ${t.toUpperCase()} destination.`);
+};
+$('btnResolveTurn').onclick=()=>resolveTurn();
+$('btnClearOrders').onclick=()=>{ state.orderQueue=[]; state.pendingOrderType=null; state.commandPoints.current=state.commandPoints.base; updateCP(0); renderOrderPaths(); toast('Orders cleared.'); };
+$('btnCloseSummary').onclick=()=>{ $('summaryModal').style.display='none'; };
+
 /* ================= Snapshots / Turns ================= */
 function getTerrainDataURL(){ return terrainCanvas.toDataURL("image/png"); }
 function setTerrainFromDataURL(url){
@@ -2215,6 +2514,10 @@ function pushSnapshot(label=null){
     units: JSON.parse(JSON.stringify(state.units)),
     idCounters: JSON.parse(JSON.stringify(state.idCounters)),
     templates: JSON.parse(JSON.stringify(state.templates)),
+    turnHistory: JSON.parse(JSON.stringify(state.turnHistory)),
+    phase: state.phase,
+    commandPoints: JSON.parse(JSON.stringify(state.commandPoints)),
+    orderQueue: JSON.parse(JSON.stringify(state.orderQueue)),
   });
   $("turnSlider").max = Math.max(0, state.snapshots.length-1);
   $("turnSlider").value = state.snapshots.length-1;
@@ -2239,6 +2542,13 @@ function loadSnapshot(idx){
   state.units=s.units||[];
   state.idCounters=s.idCounters||{};
   if(s.templates) state.templates=s.templates;
+  state.turnHistory=s.turnHistory||[];
+  state.phase=s.phase||"planning";
+  state.commandPoints=s.commandPoints||{base:8,current:8};
+  state.orderQueue=s.orderQueue||[];
+  setPhase(state.phase);
+  updateCP(0);
+  renderTurnHistory();
 
   renderCoast();
   renderInfra(); renderOverlays(); renderUnits();
@@ -2247,7 +2557,7 @@ function loadSnapshot(idx){
   recomputeAOTerritory();
 }
 $("btnSnap").onclick=()=>{ pushSnapshot(); toast("Snapshot saved."); };
-$("btnNewTurn").onclick=()=>{ state.turn+=1; $("turnLabel").textContent=state.turn; toast(`Turn ${state.turn}`); };
+$("btnNewTurn").onclick=()=>{ state.turn+=1; $("turnLabel").textContent=state.turn; state.commandPoints.current=state.commandPoints.base; updateCP(0); setPhase("planning"); toast(`Turn ${state.turn}`); };
 $("turnSlider").addEventListener("input",(e)=>loadSnapshot(parseInt(e.target.value,10)));
 
 /* Replay */
@@ -2284,6 +2594,10 @@ $("btnExport").onclick=()=>{
     shapes: state.shapes,
     units: state.units,
     snapshots: state.snapshots,
+    turnHistory: state.turnHistory,
+    phase: state.phase,
+    commandPoints: state.commandPoints,
+    orderQueue: state.orderQueue,
     idCounters: state.idCounters,
     templates: state.templates
   }, null, 2);
@@ -2304,6 +2618,10 @@ $("btnImport").onclick=()=>{
     state.shapes=p.shapes||[];
     state.units=p.units||[];
     state.snapshots=p.snapshots||[];
+    state.turnHistory=p.turnHistory||[];
+    state.phase=p.phase||"planning";
+    state.commandPoints=p.commandPoints||{base:8,current:8};
+    state.orderQueue=p.orderQueue||[];
     state.idCounters=p.idCounters||{};
     state.templates=p.templates||JSON.parse(JSON.stringify(DEFAULT_TEMPLATES));
 
@@ -2444,6 +2762,10 @@ function saveAutosave(){
       shapes: state.shapes,
       units: state.units,
       snapshots: state.snapshots,
+      turnHistory: state.turnHistory,
+      phase: state.phase,
+      commandPoints: state.commandPoints,
+      orderQueue: state.orderQueue,
       idCounters: state.idCounters,
       templates: state.templates,
       turn: state.turn
@@ -2464,6 +2786,10 @@ function loadAutosave(){
     state.shapes=p.shapes||[];
     state.units=p.units||[];
     state.snapshots=p.snapshots||[];
+    state.turnHistory=p.turnHistory||[];
+    state.phase=p.phase||"planning";
+    state.commandPoints=p.commandPoints||{base:8,current:8};
+    state.orderQueue=p.orderQueue||[];
     state.idCounters=p.idCounters||{};
     state.templates=p.templates||JSON.parse(JSON.stringify(DEFAULT_TEMPLATES));
     state.turn=p.turn||0;
@@ -2524,6 +2850,10 @@ function init(){
   }else{
     applyLayerToggles();
   }
+  setPhase(state.phase||"planning");
+  updateCP(0);
+  renderTurnHistory();
+  renderOrderPaths();
   updateInteractionPointerEvents();
   setInterval(saveAutosave, 3000);
   toast(restored ? "Restored autosave." : "v7.4 loaded: smooth paint + ocean + lake coastlines.");
