@@ -27,10 +27,10 @@
     color:var(--text);
     font:14px/1.25 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
   }
-  .app{display:grid; grid-template-columns: 500px 1fr; height:100vh; width:100vw;}
+  .app{display:grid; grid-template-columns: 520px 1fr; height:100vh; width:100vw;}
   .sidebar{
-    background:linear-gradient(180deg,var(--panel),var(--panel2));
-    border-right:1px solid var(--line);
+    background:linear-gradient(180deg,#121a24,#0e1520 38%,#0a121c);
+    border-right:1px solid #2f4056;
     padding:14px; overflow:auto;
   }
   .topbar{display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:12px;}
@@ -51,8 +51,8 @@
   .row.nowrap{flex-wrap:nowrap}
   .row > *{flex:1}
   .card{
-    border:1px solid var(--line);
-    background:rgba(255,255,255,.03);
+    border:1px solid #2b3b50;
+    background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.02));
     border-radius:16px; padding:12px; margin:10px 0;
   }
   .card h3{
@@ -190,7 +190,11 @@
   .rosterList{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:8px;background:rgba(9,14,21,.55)}
   .rosterItem{padding:7px;border:1px solid #2a3d59;border-radius:10px;margin-bottom:7px;cursor:pointer}
   .rosterItem:hover{border-color:#3e5f8a}
-  .fadeTurn{animation:turnFade .42s ease;}
+   .fadeTurn{animation:turnFade .42s ease;}
+  .opsGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .combatPanel{border:1px solid #30445f;border-radius:12px;padding:8px;background:rgba(11,18,28,.7)}
+  .combatOdds{font-size:18px;font-weight:900;color:#ffd24a}
+  .aiBadge{font-weight:900;color:#8bc1ff}
   @keyframes turnFade{from{opacity:.35;transform:scale(.995)}to{opacity:1;transform:scale(1)}}
 
   @keyframes pulse {
@@ -584,6 +588,20 @@
         <button class="btn secondary" id="btnClearOrders">Clear Orders</button>
       </div>
       <textarea id="turnLogText" rows="4" placeholder="Turn event log appears here..."></textarea>
+      <div class="opsGrid">
+        <div class="combatPanel">
+          <div><b>Combat Odds</b></div>
+          <div class="combatOdds" id="combatOdds">N/A</div>
+          <div class="hint" id="combatHint">Select a unit to preview nearest engagement.</div>
+        </div>
+        <div class="combatPanel">
+          <div><b>AI Control</b> <span class="aiBadge" id="aiState">ENABLED</span></div>
+          <select id="aiDifficulty" class="bigSelect">
+            <option value="easy">Easy</option><option value="normal" selected>Normal</option><option value="hard">Hard</option>
+          </select>
+          <label class="toggle" style="margin-top:6px;display:inline-flex"><input type="checkbox" id="aiEnabled" checked /> AI Enabled</label>
+        </div>
+      </div>
 
       <div class="sep"></div>
       <h3 style="margin-top:0">Unit Builder + ORBAT</h3>
@@ -733,6 +751,41 @@ function unitCombatPower(u){
   const supply={well:1,low:.75,out:.45}[u.supply||"well"]||1;
   const morale=((u.morale??75)/100);
   return Math.round((u.power||60)*readiness*supply*morale);
+}
+function updateCombatPreview(){
+  const oddsEl=$("combatOdds"), hintEl=$("combatHint");
+  if(!oddsEl || !hintEl){ return; }
+  if(state.selected.kind!=="unit"){ oddsEl.textContent="N/A"; hintEl.textContent="Select a unit to preview nearest engagement."; return; }
+  const u=unitById(state.selected.id);
+  if(!u){ oddsEl.textContent="N/A"; return; }
+  const enemy=nearestEnemy(u);
+  if(!enemy){ oddsEl.textContent="No enemy"; hintEl.textContent="No opposing unit detected."; return; }
+  const atk=unitCombatPower(u), def=unitCombatPower(enemy);
+  const odds=(atk/(def||1));
+  oddsEl.textContent=`${odds.toFixed(2)} : 1`;
+  hintEl.textContent=`${u.id} vs ${enemy.id} (Power ${atk} vs ${def})`;
+}
+function aiDelta(){
+  const d=state.ai?.difficulty||"normal";
+  return d==="hard" ? 85 : d==="easy" ? 35 : 55;
+}
+function aiTakeTurn(){
+  const movers=state.units.filter(u=>u.affil==='hostile');
+  for(const aiu of movers){
+    const tgt=state.units.filter(f=>f.affil!==aiu.affil).sort((a,b)=>dist2(aiu,a)-dist2(aiu,b))[0];
+    if(!tgt) continue;
+    const step=aiDelta();
+    const dx=(tgt.x-aiu.x), dy=(tgt.y-aiu.y);
+    const len=Math.hypot(dx,dy)||1;
+    aiu.x=clamp(0,state.stage.w-aiu.w, aiu.x + (dx/len)*step + (-10+Math.random()*20));
+    aiu.y=clamp(0,state.stage.h-aiu.h, aiu.y + (dy/len)*step + (-10+Math.random()*20));
+    if(dist2(aiu,tgt)<180*180){
+      const dmg=Math.round(8 + Math.random()*14 + (state.ai?.difficulty==='hard'?6:0));
+      tgt.hp=clamp(0,100,(tgt.hp??100)-dmg);
+      showFx('combat',tgt.x+tgt.w/2,tgt.y+tgt.h/2);
+    }
+  }
+  state.units=state.units.filter(u=>(u.hp??100)>0);
 }
 function renderTurnHistory(){
   const box=$("historyLog");
@@ -1055,6 +1108,7 @@ function applyStageSize(w,h){
   renderInfra();
   renderOverlays();
   renderUnits();
+  updateCombatPreview();
   fitStage();
 }
 $("btnResizeStage").onclick=()=>{
@@ -1113,6 +1167,8 @@ $("toolFront").onclick=()=>setTool("front");
 $("toolZone").onclick=()=>setTool("zone");
 $("toolNote").onclick=()=>setTool("note");
 $("toolObjective").onclick=()=>setTool("objective");
+$("aiDifficulty").addEventListener("change",e=>{ state.ai.difficulty=e.target.value; addTurnLog("AI difficulty", e.target.value); });
+$("aiEnabled").addEventListener("change",e=>{ state.ai.enabled=!!e.target.checked; $("aiState").textContent=state.ai.enabled?"ENABLED":"DISABLED"; });
 
 /* ================= Map Image ================= */
 function fileToDataURL(file){
@@ -2063,6 +2119,7 @@ function select(kind,id){
   $("selectedBadge").textContent=`Selected: ${kind} ${id}`;
   renderInfra();
   renderUnits();
+  updateCombatPreview();
 }
 function clearSelection(){
   state.selected={kind:null,id:null};
@@ -2557,7 +2614,7 @@ async function resolveTurn(){
       if(enemy){
         report.combats++;
         const atk=unitCombatPower(u), def=unitCombatPower(enemy);
-        const terrainMod=1; const odds=atk/(def||1)*terrainMod;
+        const terrainMod=(u.engaged?1.08:1) / riverPenalty({x:u.x,y:u.y},{x:enemy.x,y:enemy.y}); const odds=atk/(def||1)*terrainMod;
         const dmg=Math.round(clamp(8,35, 12 + odds*10));
         enemy.hp=clamp(0,100,(enemy.hp??100)-dmg);
         enemy.morale=clamp(0,100,(enemy.morale??75)-Math.round(dmg/2));
@@ -2576,11 +2633,8 @@ async function resolveTurn(){
     }
   }
   if(state.ai?.enabled){
-    for(const aiu of state.units.filter(u=>u.affil==='hostile')){
-      aiu.x=clamp(0,state.stage.w-aiu.w, aiu.x + (-40+Math.random()*80));
-      aiu.y=clamp(0,state.stage.h-aiu.h, aiu.y + (-40+Math.random()*80));
-    }
-    addTurnLog('AI acted','Hostile units repositioned.');
+    aiTakeTurn();
+    addTurnLog('AI acted',`Hostile forces executed ${state.ai.difficulty} behavior.`);
   }
   stageEl.classList.add('fadeTurn'); setTimeout(()=>stageEl.classList.remove('fadeTurn'),460);
   renderOverlays(); renderUnits(); renderOrderPaths();
@@ -2982,6 +3036,10 @@ function init(){
   updateCP(0);
   renderTurnHistory();
   renderOrderPaths();
+  if($("aiDifficulty")) $("aiDifficulty").value=state.ai?.difficulty||"normal";
+  if($("aiEnabled")) $("aiEnabled").checked=!!state.ai?.enabled;
+  if($("aiState")) $("aiState").textContent=state.ai?.enabled?"ENABLED":"DISABLED";
+  updateCombatPreview();
   updateInteractionPointerEvents();
   setInterval(saveAutosave, 3000);
   toast(restored ? "Restored autosave." : "v7.4 loaded: smooth paint + ocean + lake coastlines.");
