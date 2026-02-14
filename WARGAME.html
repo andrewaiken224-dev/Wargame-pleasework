@@ -187,6 +187,11 @@
 
   .summaryModal{position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,.62); display:none; align-items:center; justify-content:center;}
   .summaryCard{width:min(720px,92vw); background:linear-gradient(180deg,var(--panel),var(--panel2)); border:1px solid var(--line); border-radius:16px; padding:14px;}
+  .rosterList{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:8px;background:rgba(9,14,21,.55)}
+  .rosterItem{padding:7px;border:1px solid #2a3d59;border-radius:10px;margin-bottom:7px;cursor:pointer}
+  .rosterItem:hover{border-color:#3e5f8a}
+  .fadeTurn{animation:turnFade .42s ease;}
+  @keyframes turnFade{from{opacity:.35;transform:scale(.995)}to{opacity:1;transform:scale(1)}}
 
   @keyframes pulse {
     0% { transform: scale(1); filter: drop-shadow(0 6px 14px rgba(0,0,0,.35)); }
@@ -252,6 +257,9 @@
       <div class="row">
         <button class="btn" id="btnResizeStage">Apply</button>
         <button class="btn secondary" id="btnFitStage">Fit View</button>
+      </div>
+      <div class="row">
+        <button class="btn good" id="btnRandomMap">🎲 Random Map</button>
       </div>
     </div>
 
@@ -437,6 +445,7 @@
         <button class="btn" id="toolFront">➰ Front / LOA</button>
         <button class="btn" id="toolZone">⬛ Zone / AO</button>
         <button class="btn" id="toolNote">📝 Note</button>
+        <button class="btn" id="toolObjective">⭐ Objective</button>
       </div>
       <div class="row">
         <button class="btn secondary" id="btnFinishPlan">Finish</button>
@@ -593,6 +602,12 @@
       <div class="historyLog" id="historyLog"></div>
     </div>
 
+
+    <div class="card">
+      <h3>Unit Roster</h3>
+      <div class="rosterList" id="rosterList"></div>
+    </div>
+
     <div class="card">
       <h3>Scenario Save / Load</h3>
       <div class="row">
@@ -634,6 +649,11 @@
           <div class="unitsLayer" id="unitsLayer"></div>
           <div class="fxLayer" id="fxLayer"></div>
           <div class="interaction" id="interaction" title="Interaction layer"></div>
+          <div class="stageHud">
+            <div class="scaleBar"><div class="scaleTicks"></div><span>10 km</span></div>
+            <div class="northArrow">⬆ N</div>
+            <div class="legendBox">Legend: Blue/Friendly • Red/Hostile • ⭐ Objective</div>
+          </div>
         </div>
       </div>
 
@@ -747,6 +767,77 @@ function showTurnSummary(html){
   $("summaryBody").innerHTML=html;
   $("summaryModal").style.display="flex";
 }
+function renderRoster(){
+  const box=$("rosterList"); if(!box) return;
+  box.innerHTML="";
+  for(const u of state.units){
+    const e=document.createElement("div");
+    e.className="rosterItem";
+    e.innerHTML=`<b>${escapeHtml(u.id)}</b> ${escapeHtml(u.label)}<div class="hint">${escapeHtml(u.affil)} | HP ${Math.round(u.hp??100)} ${u.engaged?"⚔ ENGAGED":""}</div>`;
+    e.onclick=()=>{ select("unit",u.id); focusSelected(); };
+    box.appendChild(e);
+  }
+}
+function refreshEngagementState(){
+  for(const u of state.units){
+    u.engaged=state.units.some(e=>e.affil!==u.affil && dist2({x:u.x,y:u.y},{x:e.x,y:e.y})<220*220);
+  }
+}
+function drawSupplyAndObjectives(){
+  overlaySvg.querySelectorAll('.supplyLine,.objectiveMark').forEach(n=>n.remove());
+  for(const n of state.logisticsNodes){
+    const c=document.createElementNS("http://www.w3.org/2000/svg","circle");
+    c.setAttribute("cx",n.x); c.setAttribute("cy",n.y); c.setAttribute("r",9); c.setAttribute("fill","#f59e0b"); c.setAttribute("class","objectiveMark");
+    overlaySvg.appendChild(c);
+  }
+  for(const u of state.units.filter(x=>x.affil==="friendly")){
+    let best=null,bd=1e18;
+    for(const n of state.logisticsNodes){ const d=dist2(u,n); if(d<bd){bd=d;best=n;} }
+    if(!best) continue;
+    const l=document.createElementNS("http://www.w3.org/2000/svg","line");
+    l.setAttribute("x1",u.x+u.w/2); l.setAttribute("y1",u.y+u.h/2); l.setAttribute("x2",best.x); l.setAttribute("y2",best.y);
+    l.setAttribute("stroke","rgba(245,158,11,.55)"); l.setAttribute("stroke-dasharray","7 6"); l.setAttribute("class","supplyLine");
+    overlaySvg.appendChild(l);
+    if(bd>380*380) u.supply="low";
+  }
+  for(const o of state.objectivePoints){
+    const g=document.createElementNS("http://www.w3.org/2000/svg","text");
+    g.setAttribute("x",o.x); g.setAttribute("y",o.y); g.setAttribute("fill","#ffd24a"); g.setAttribute("font-size","22"); g.setAttribute("class","objectiveMark");
+    g.textContent=`⭐${o.value}`; overlaySvg.appendChild(g);
+  }
+}
+function riverPenalty(from,to){
+  const rivers=state.infraShapes.filter(s=>s.kind==="line" && s.lineType==="river");
+  for(const r of rivers){
+    for(const p of r.points){
+      const d=Math.hypot(p.x-(from.x+to.x)/2,p.y-(from.y+to.y)/2);
+      if(d<34) return 1.4;
+    }
+  }
+  return 1;
+}
+function randomizeMap(){
+  clearTerrain();
+  const W=state.stage.w,H=state.stage.h;
+  const grad=tctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,terrainColor("ice")); grad.addColorStop(.35,terrainColor("land")); grad.addColorStop(.75,terrainColor("forest")); grad.addColorStop(1,terrainColor("desert"));
+  tctx.fillStyle=grad; tctx.globalAlpha=.72; tctx.fillRect(0,0,W,H);
+  tctx.globalAlpha=.55;
+  for(let i=0;i<26;i++){
+    tctx.fillStyle=i%4?terrainColor("forest"):terrainColor("mountain");
+    const x=Math.random()*W,y=Math.random()*H,r=40+Math.random()*180;
+    tctx.beginPath(); tctx.arc(x,y,r,0,Math.PI*2); tctx.fill();
+  }
+  tctx.globalAlpha=.75;
+  const river={id:"L-"+cryptoRand(),kind:"line",lineType:"river",width:8,points:[]};
+  let x=0,y=Math.random()*H;
+  while(x<W){ river.points.push({x,y}); x+=80+Math.random()*70; y=clamp(0,H,y+(Math.random()-.5)*130);} 
+  state.infraShapes.push(river);
+  state.logisticsNodes=[{id:"LN-1",x:120,y:H-120},{id:"LN-2",x:W-160,y:130}];
+  state.objectivePoints=[{id:"OBJ-1",x:W*.5,y:H*.45,value:5},{id:"OBJ-2",x:W*.75,y:H*.68,value:3}];
+  renderInfra(); renderOverlays();
+  toast("Random map generated.");
+}
 function dist2(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy; }
 function pointInPolygon(pt, poly){
   let inside=false;
@@ -806,7 +897,10 @@ const state={
   turnHistory:[],
   fogOfWar:true,
   aiEnabled:false,
-  selectedUnits:[]
+  selectedUnits:[],
+  logisticsNodes:[],
+  objectivePoints:[],
+  ai:{enabled:true,difficulty:"normal"}
 };
 
 const AUTOSAVE_KEY="war_tracker_v74_autosave";
@@ -1018,6 +1112,7 @@ $("toolSelectPlan").onclick=()=>setTool("selectPlan");
 $("toolFront").onclick=()=>setTool("front");
 $("toolZone").onclick=()=>setTool("zone");
 $("toolNote").onclick=()=>setTool("note");
+$("toolObjective").onclick=()=>setTool("objective");
 
 /* ================= Map Image ================= */
 function fileToDataURL(file){
@@ -1034,6 +1129,7 @@ $("mapFile").addEventListener("change", async (e)=>{
   mapImgEl.src=state.mapDataUrl;
   toast("Map image loaded.");
 });
+$("btnRandomMap").onclick=()=>randomizeMap();
 $("btnClearMap").onclick=()=>{
   state.mapDataUrl="";
   mapImgEl.removeAttribute("src");
@@ -1667,6 +1763,7 @@ function renderOverlays(){
     overlaySvg.appendChild(l);
   }
   renderOrderPaths();
+  drawSupplyAndObjectives();
   applyLayerToggles();
 }
 
@@ -1853,6 +1950,8 @@ function renderUnits(){
     parentSel.innerHTML='<option value="">Parent: none</option>'+state.units.map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.id)} — ${escapeHtml(u.label)}</option>`).join('');
     parentSel.value=keep;
   }
+  refreshEngagementState();
+  renderRoster();
   applyLayerToggles();
 }
 function startUnitDrag(ev, el, u){
@@ -2231,6 +2330,13 @@ interaction.addEventListener("pointerdown",(ev)=>{
     return;
   }
 
+  if(state.appMode==="plan" && state.tool==="objective"){
+    state.objectivePoints.push({id:"OBJ-"+cryptoRand(),x:p.x,y:p.y,value:3});
+    addTurnLog("Objective placed",`(${Math.round(p.x)},${Math.round(p.y)})`);
+    renderOverlays();
+    return;
+  }
+
   if(state.appMode==="plan" && state.tool==="note"){
     const text=prompt("Note text:");
     if(!text) return;
@@ -2441,7 +2547,8 @@ async function resolveTurn(){
     const u=unitById(o.unitId); if(!u || u.hp<=0) continue;
     if(o.type==='move' || o.type==='recon' || o.type==='defend'){
       if(o.to){
-        await animateUnitMove(u,{x:clamp(0,state.stage.w-u.w,o.to.x),y:clamp(0,state.stage.h-u.h,o.to.y)}, o.type==='recon'?300:460);
+        const pen=riverPenalty({x:u.x,y:u.y},o.to);
+        await animateUnitMove(u,{x:clamp(0,state.stage.w-u.w,o.to.x),y:clamp(0,state.stage.h-u.h,o.to.y)}, (o.type==='recon'?300:460)*pen);
         report.moves++;
       }
     }
@@ -2468,11 +2575,20 @@ async function resolveTurn(){
       showFx('capture',cx,cy); report.captures++;
     }
   }
+  if(state.ai?.enabled){
+    for(const aiu of state.units.filter(u=>u.affil==='hostile')){
+      aiu.x=clamp(0,state.stage.w-aiu.w, aiu.x + (-40+Math.random()*80));
+      aiu.y=clamp(0,state.stage.h-aiu.h, aiu.y + (-40+Math.random()*80));
+    }
+    addTurnLog('AI acted','Hostile units repositioned.');
+  }
+  stageEl.classList.add('fadeTurn'); setTimeout(()=>stageEl.classList.remove('fadeTurn'),460);
   renderOverlays(); renderUnits(); renderOrderPaths();
   state.turn+=1; $('turnLabel').textContent=state.turn;
   state.commandPoints.current=state.commandPoints.base; updateCP(0);
-  addTurnLog('Turn resolved', `Moves ${report.moves}, combats ${report.combats}, losses ${report.casualties}`);
-  showTurnSummary(`<ul><li>Moves executed: <b>${report.moves}</b></li><li>Combats: <b>${report.combats}</b></li><li>Casualties: <b>${report.casualties}</b></li><li>Territory checks: <b>${report.captures}</b></li></ul>`);
+  const vp=state.objectivePoints.reduce((a,o)=>a + (state.units.some(u=>u.affil==='friendly' && dist2({x:u.x+u.w/2,y:u.y+u.h/2},o)<120*120)?o.value:0),0);
+  addTurnLog('Turn resolved', `Moves ${report.moves}, combats ${report.combats}, losses ${report.casualties}, VP ${vp}`);
+  showTurnSummary(`<ul><li>Moves executed: <b>${report.moves}</b></li><li>Combats: <b>${report.combats}</b></li><li>Casualties: <b>${report.casualties}</b></li><li>Territory checks: <b>${report.captures}</b></li><li>Victory points: <b>${vp}</b></li></ul>`);
   pushSnapshot(`Turn ${state.turn} resolved`);
   setPhase('planning');
 }
@@ -2518,6 +2634,8 @@ function pushSnapshot(label=null){
     phase: state.phase,
     commandPoints: JSON.parse(JSON.stringify(state.commandPoints)),
     orderQueue: JSON.parse(JSON.stringify(state.orderQueue)),
+    logisticsNodes: JSON.parse(JSON.stringify(state.logisticsNodes)),
+    objectivePoints: JSON.parse(JSON.stringify(state.objectivePoints)),
   });
   $("turnSlider").max = Math.max(0, state.snapshots.length-1);
   $("turnSlider").value = state.snapshots.length-1;
@@ -2546,6 +2664,8 @@ function loadSnapshot(idx){
   state.phase=s.phase||"planning";
   state.commandPoints=s.commandPoints||{base:8,current:8};
   state.orderQueue=s.orderQueue||[];
+  state.logisticsNodes=s.logisticsNodes||[];
+  state.objectivePoints=s.objectivePoints||[];
   setPhase(state.phase);
   updateCP(0);
   renderTurnHistory();
@@ -2598,6 +2718,8 @@ $("btnExport").onclick=()=>{
     phase: state.phase,
     commandPoints: state.commandPoints,
     orderQueue: state.orderQueue,
+    logisticsNodes: state.logisticsNodes,
+    objectivePoints: state.objectivePoints,
     idCounters: state.idCounters,
     templates: state.templates
   }, null, 2);
@@ -2622,6 +2744,8 @@ $("btnImport").onclick=()=>{
     state.phase=p.phase||"planning";
     state.commandPoints=p.commandPoints||{base:8,current:8};
     state.orderQueue=p.orderQueue||[];
+    state.logisticsNodes=p.logisticsNodes||[];
+    state.objectivePoints=p.objectivePoints||[];
     state.idCounters=p.idCounters||{};
     state.templates=p.templates||JSON.parse(JSON.stringify(DEFAULT_TEMPLATES));
 
@@ -2766,6 +2890,8 @@ function saveAutosave(){
       phase: state.phase,
       commandPoints: state.commandPoints,
       orderQueue: state.orderQueue,
+      logisticsNodes: state.logisticsNodes,
+      objectivePoints: state.objectivePoints,
       idCounters: state.idCounters,
       templates: state.templates,
       turn: state.turn
@@ -2790,6 +2916,8 @@ function loadAutosave(){
     state.phase=p.phase||"planning";
     state.commandPoints=p.commandPoints||{base:8,current:8};
     state.orderQueue=p.orderQueue||[];
+    state.logisticsNodes=p.logisticsNodes||[];
+    state.objectivePoints=p.objectivePoints||[];
     state.idCounters=p.idCounters||{};
     state.templates=p.templates||JSON.parse(JSON.stringify(DEFAULT_TEMPLATES));
     state.turn=p.turn||0;
